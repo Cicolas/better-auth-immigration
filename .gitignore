@@ -1,3 +1,16 @@
 node_modules
 dist
+*.tgz
+coverage
+*.lcov
+logs
+*.log
+.cache
+*.tsbuildinfo
 .env
+.env.development.local
+.env.test.local
+.env.production.local
+.env.local
+.npmrc
+.DS_Store
