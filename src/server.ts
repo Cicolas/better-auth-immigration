@@ -5,16 +5,44 @@ import { setSessionCookie } from "better-auth/cookies";
 import { parseUserOutput } from "better-auth/db";
 import type { BetterAuthPlugin, GenericEndpointContext } from "better-auth";
 
+/**
+ * Default Better Auth endpoint path for exchanging a legacy credential.
+ *
+ * Better Auth mounts plugin endpoints under the auth base path, so the default
+ * full route is usually `/api/auth/legacy-immigration/exchange`.
+ */
 export const DEFAULT_ENDPOINT_PATH = "/legacy-immigration/exchange";
+
+/**
+ * Default legacy cookie name used when cookie-based token extraction is enabled.
+ */
 export const DEFAULT_COOKIE_NAME = "cookie";
 
+/**
+ * Result returned after a legacy credential has been verified.
+ *
+ * `legacyUserId` should be the stable identifier from the legacy auth system.
+ * `payload` can carry decoded token claims or other verification output into
+ * `resolveTransition` without requiring the token to be parsed twice.
+ */
 export type VerifiedLegacyToken<Payload = unknown> = {
   legacyUserId: string;
   payload?: Payload;
 };
 
+/**
+ * Mapping from a verified legacy identity to the Better Auth user that should
+ * receive the new session.
+ */
 export type LegacyImmigrationTransition = {
+  /**
+   * Better Auth user id that should receive the migrated session.
+   */
   userId: string;
+
+  /**
+   * Optional fields forwarded to Better Auth's session creation adapter.
+   */
   sessionOverrides?: Record<string, unknown>;
 };
 
@@ -24,25 +52,79 @@ export type LegacyImmigrationOptions<
   Payload = unknown,
   Transition extends LegacyImmigrationTransition = LegacyImmigrationTransition,
 > = {
+  /**
+   * Endpoint path registered inside Better Auth.
+   *
+   * Defaults to {@link DEFAULT_ENDPOINT_PATH}.
+   */
   endpointPath?: string;
+
+  /**
+   * Legacy cookie name to read when cookie extraction is enabled.
+   *
+   * Defaults to {@link DEFAULT_COOKIE_NAME}.
+   */
   cookieName?: string;
+
+  /**
+   * Whether to accept `Authorization: Bearer <token>` credentials.
+   *
+   * Defaults to `true`. Authorization headers take precedence over cookies.
+   */
   acceptAuthorization?: boolean;
+
+  /**
+   * Whether to accept a legacy credential from `cookieName`.
+   *
+   * Defaults to `true`.
+   */
   acceptCookie?: boolean;
+
+  /**
+   * Verifies the raw legacy credential and returns its legacy identity.
+   *
+   * Throw from this callback to reject invalid, expired, revoked, or malformed
+   * credentials. The optional payload is forwarded to `resolveTransition`.
+   */
   verifyLegacyToken: (
     token: string,
     ctx: ExchangeContext,
   ) => Promise<VerifiedLegacyToken<Payload>> | VerifiedLegacyToken<Payload>;
+
+  /**
+   * Resolves a verified legacy identity to the Better Auth user to sign in.
+   *
+   * Return `null` when the credential is valid but cannot be migrated, such as
+   * when no mapping exists or a one-time migration has already been consumed.
+   * `tokenHash` is a SHA-256 hash of the raw token for lookup/audit use without
+   * storing or comparing the raw credential.
+   */
   resolveTransition: (input: {
     legacyUserId: string;
     tokenHash: string;
     payload?: Payload;
     ctx: ExchangeContext;
   }) => Promise<Transition | null> | Transition | null;
+
+  /**
+   * Optional final authorization check after the Better Auth user is loaded.
+   *
+   * Return `false` to reject the sign-in. Any other return value allows the
+   * migration to continue.
+   */
   validateUser?: (input: {
     user: Record<string, unknown>;
     transition: Transition;
     ctx: ExchangeContext;
   }) => Promise<boolean | void> | boolean | void;
+
+  /**
+   * Optional hook called after the Better Auth session is created.
+   *
+   * Use this to mark the legacy credential as migrated or record audit data. If
+   * this callback throws, the newly created session is deleted and the error is
+   * re-thrown.
+   */
   onMigrated?: (input: {
     legacyUserId: string;
     user: Record<string, unknown>;
@@ -52,10 +134,24 @@ export type LegacyImmigrationOptions<
   }) => Promise<void> | void;
 };
 
+/**
+ * Hashes a legacy token with SHA-256.
+ *
+ * This is useful for transition-table lookups, idempotency checks, and audit
+ * records where storing the raw legacy credential would be unsafe.
+ */
 export function hashLegacyToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
+/**
+ * Extracts a legacy token from request headers.
+ *
+ * Bearer authorization is checked first when enabled. If no bearer token is
+ * present and cookie extraction is enabled, the configured legacy cookie is
+ * decoded and returned. Returns `null` when no accepted credential source is
+ * present.
+ */
 export function extractLegacyToken(
   headers: Headers,
   options?: {
@@ -97,6 +193,14 @@ export function extractLegacyToken(
   return null;
 }
 
+/**
+ * Creates the Better Auth server plugin for legacy credential immigration.
+ *
+ * The registered endpoint verifies a legacy credential, resolves it to a Better
+ * Auth user, creates a Better Auth session, sets the normal Better Auth session
+ * cookie, and returns the migrated user/session token payload. It accepts
+ * bearer-token credentials and/or a legacy cookie based on the provided options.
+ */
 export function legacyImmigration<
   Payload = unknown,
   Transition extends LegacyImmigrationTransition = LegacyImmigrationTransition,

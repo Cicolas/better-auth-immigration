@@ -1,7 +1,16 @@
 import type { BetterAuthClientPlugin } from "better-auth/client";
 import { DEFAULT_ENDPOINT_PATH } from "./server.js";
 
+/**
+ * Client-side options for the legacy immigration plugin.
+ */
 export type LegacyImmigrationClientOptions = {
+  /**
+   * Endpoint path registered by the server plugin.
+   *
+   * Must match the server-side `endpointPath`. Defaults to
+   * {@link DEFAULT_ENDPOINT_PATH}.
+   */
   endpointPath?: string;
 };
 
@@ -31,6 +40,14 @@ function withAuthorizationHeader(
   };
 }
 
+/**
+ * Creates the Better Auth client plugin for legacy credential immigration.
+ *
+ * Adds `authClient.legacyImmigration.exchange()`. Passing `input.token` sends
+ * it as `Authorization: Bearer <token>`. Omitting the token leaves credentials
+ * to the request context, which allows the server endpoint to read the legacy
+ * cookie when cookie extraction is enabled.
+ */
 export function legacyImmigrationClient(
   options?: LegacyImmigrationClientOptions,
 ) {
